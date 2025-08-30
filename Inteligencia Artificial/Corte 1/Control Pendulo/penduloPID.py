@@ -1,117 +1,186 @@
+
 import numpy as np
 import pygame
-from scipy.integrate import odeint
+import math
 
-# ==== Parámetros físicos ====
-M = 0.5      # masa del carrito (kg)
-m = 0.2      # masa del péndulo (kg)
-b = 0.1      # fricción del carrito
-l = 0.3      # longitud al centro de masa del péndulo (m)
-I = 0.006    # inercia del péndulo (kg*m^2)
-g = 9.81     # gravedad (m/s²)
+# Parámetros 
+M = 0.5      # masa carro (kg)
+m = 0.2      # masa péndulo (kg)
+b = 0.1      # fricción carro (N·s/m)
+l = 0.5    # distancia CG (m)
+I = 0.006    # inercia péndulo
+b_p = 0.01   # fricción pivote
+g = 9.81
+dt = 0.01
 
-# ==== Parámetros PID ====
+#Constantes PID
 Kp_theta = 150.0
 Ki_theta = 0.0
 Kd_theta = 25.0
 
-Kp_x = 1.0
-Ki_x = 0.0
-Kd_x = 1.0
+# Referencia Cascada
+Kp_pos = 2.0
+Kd_pos = 1.2
 
-# ==== Estado inicial ====
-x = 0.0
-x_dot = 0.0
-theta = np.deg2rad(10)  # inclinación inicial (rad)
-theta_dot = 0.0
+# Límites
+force_limit = 25.0   # Limite fuerza del motor
+theta_ref_limit = math.radians(18)  # limite del angulo
+x_limit = 3  # m, maximo que el carro puede moverse
 
-state = np.array([x, x_dot, theta, theta_dot])
+def initial_state():
+    # estado: [x, x_dot, Angulo Inicial, theta_dot]  
+    return np.array([0.0, 0.0, math.radians(8.0), 0.0], dtype=float)
 
-# ==== PID ====
-error_sum_theta = 0.0
-prev_error_theta = 0.0
+state = initial_state()
+integral_theta = 0.0
 
-error_sum_x = 0.0
-prev_error_x = 0.0
 
-# ==== Tiempo de simulación ====
-dt = 0.02
-t = 0.0
+def f_nonlinear(y, F):
+    x, x_dot, th, th_dot = y
+    st = math.sin(th)
+    ct = math.cos(th)
+    Den = (I + m * l**2) * (M + m) - (m * l * ct)**2
+    if abs(Den) < 1e-9:
+        Den = 1e-9
 
-# ==== Inicializar Pygame ====
+    Fx = F - b * x_dot - m * l * th_dot**2 * st
+    T = m * g * l * st + b_p * th_dot
+
+    th_dd = ((m * l * ct) * Fx - (M + m) * T) / Den
+    x_dd  = ((I + m * l**2) * Fx + (m * l * ct) * T) / Den
+    return np.array([x_dot, x_dd, th_dot, th_dd], dtype=float)
+
+# RK4 integrator step
+def rk4_step(y, F, dt):
+    k1 = f_nonlinear(y, F)
+    k2 = f_nonlinear(y + 0.5*dt*k1, F)
+    k3 = f_nonlinear(y + 0.5*dt*k2, F)
+    k4 = f_nonlinear(y + dt*k3, F)
+    return y + dt*(k1 + 2*k2 + 2*k3 + k4)/6.0
+
+#pa la app 
 pygame.init()
-WIDTH, HEIGHT = 1000, 600
+WIDTH, HEIGHT = 1100, 600
 screen = pygame.display.set_mode((WIDTH, HEIGHT))
-pygame.display.set_caption("Péndulo Invertido con PID")
+pygame.display.set_caption("Péndulo Invertido - Control en Cascada PD")
+font = pygame.font.SysFont("Arial", 18)
 clock = pygame.time.Clock()
 
-# ==== Escalado para dibujo ====
+# drawing scales
 scale = 200  # pixeles por metro
-cart_y = HEIGHT // 2
+cart_y_px = HEIGHT // 2
 
-# ==== Modelo dinámico ====
-def deriv(y, t, F):
-    x, x_dot, theta, theta_dot = y
+# button
+run_rect = pygame.Rect(30, 20, 100, 40)
+reset_rect = pygame.Rect(150, 20, 100, 40)
 
-    sin_theta = np.sin(theta)
-    cos_theta = np.cos(theta)
-    denominator = I*(M+m) + M*m*l**2 + m**2*l**2*(1 - cos_theta**2)
+simulating = False
 
-    theta_ddot = (
-        (m * g * l * sin_theta * (M + m) - cos_theta * (F + m * l * theta_dot**2 * sin_theta - b * x_dot)) /
-        (l * denominator)
-    )
+# helper: draw text
+def draw_text(surf, text, pos, color=(0,0,0)):
+    surf.blit(font.render(text, True, color), pos)
 
-    x_ddot = (
-        F + m * l * theta_dot**2 * sin_theta - m * l * cos_theta * theta_ddot - b * x_dot
-    ) / (M + m)
-
-    return [x_dot, x_ddot, theta_dot, theta_ddot]
-
-# ==== Bucle principal ====
+# -----------------------
+# Main loop
+# -----------------------
 running = True
 while running:
     for event in pygame.event.get():
         if event.type == pygame.QUIT:
             running = False
 
-    # ==== PID para ángulo ====
-    error_theta = 0.0 - state[2]  # queremos que theta sea 0
-    error_sum_theta += error_theta * dt
-    d_error_theta = (error_theta - prev_error_theta) / dt
-    prev_error_theta = error_theta
+        elif event.type == pygame.MOUSEBUTTONDOWN:
+            mx, my = event.pos
+            if run_rect.collidepoint(mx, my):
+                simulating = True
+            elif reset_rect.collidepoint(mx, my):
+                # reiniciar estado
+                state = initial_state()
+                integral_theta = 0.0
+                simulating = False
 
-    u_theta = (Kp_theta * error_theta) + (Ki_theta * error_sum_theta) + (Kd_theta * d_error_theta)
+    screen.fill((255,255,255))
 
-    # ==== PID para posición ====
-    error_x = 0.0 - state[0]  # queremos que x sea 0
-    error_sum_x += error_x * dt
-    d_error_x = (error_x - prev_error_x) / dt
-    prev_error_x = error_x
+    # Draw buttons
+    pygame.draw.rect(screen, (0, 150, 0), run_rect)
+    draw_text(screen, "RUN", (run_rect.x+32, run_rect.y+10), (255,255,255))
+    pygame.draw.rect(screen, (150, 0, 0), reset_rect)
+    draw_text(screen, "RESET", (reset_rect.x+18, reset_rect.y+10), (255,255,255))
 
-    u_x = (Kp_x * error_x) + (Ki_x * error_sum_x) + (Kd_x * d_error_x)
+    # Draw info panel
+    draw_text(screen, f"Kp_theta={Kp_theta:.1f}  Kd_theta={Kd_theta:.1f}", (30,80))
+    draw_text(screen, f"Kp_pos={Kp_pos:.2f}  Kd_pos={Kd_pos:.2f}", (30,100))
+    draw_text(screen, f"force_limit={force_limit:.1f} N", (30,120))
 
-    # ==== Combinación de control ====
-    F = u_theta + u_x
+    if simulating:
+        # read current states
+        x, x_dot, theta, theta_dot = state
 
-    # ==== Integración numérica ====
-    state = odeint(deriv, state, [0, dt], args=(F,))[1]
+        # --- Lazo externo: posición -> theta_ref (PD) ---
+        pos_err = 0.0 - x
+        theta_ref = Kp_pos * pos_err - Kd_pos * x_dot
+        # saturar theta_ref
+        if theta_ref > theta_ref_limit: theta_ref = theta_ref_limit
+        if theta_ref < -theta_ref_limit: theta_ref = -theta_ref_limit
 
-    # ==== Dibujar ====
-    screen.fill((255, 255, 255))
+        # --- Lazo interno: PD sobre theta (puedes activar Ki_theta si quieres) ---
+        err_theta = theta_ref - theta
+        derivative_theta = -theta_dot  # approx de d(err)/dt
+        # integral anti-windup (simple) -- solo si Ki_theta > 0
+        if Ki_theta != 0:
+            integral_theta += err_theta * dt
 
-    cart_x = WIDTH // 2 + float(state[0] * scale)  # aseguramos que sea float
+        F_unsat = Kp_theta * err_theta + Ki_theta * integral_theta + Kd_theta * derivative_theta
 
-    # Carrito
-    pygame.draw.rect(screen, (0, 0, 0), (cart_x - 40, cart_y - 20, 80, 40), 2)
+        # saturación de fuerza y anti-windup
+        F = max(-force_limit, min(force_limit, F_unsat))
+        if Ki_theta != 0:
+            if abs(F_unsat) > force_limit:
+                # evitar crecer la integral si saturado
+                integral_theta -= err_theta * dt
 
-    # Péndulo
-    pend_x = cart_x + float(l * scale * np.sin(state[2]))
-    pend_y = cart_y - float(l * scale * np.cos(state[2]))
-    pygame.draw.line(screen, (255, 0, 0), (cart_x, cart_y), (pend_x, pend_y), 4)
-    pygame.draw.circle(screen, (0, 0, 255), (int(pend_x), int(pend_y)), 10)
+        # protección de límites espaciales
+        if state[0] <= -x_limit and F < 0: F = 0.0
+        if state[0] >=  x_limit and F > 0: F = 0.0
+
+        # Integrar con RK4
+        state = rk4_step(state, F, dt)
+
+        # Draw cart and pendulum
+        cart_x_px = int(WIDTH//2 + state[0]*scale)
+        cart_y = cart_y_px
+        # ensure ints for pygame
+        cart_x_px_i = int(cart_x_px)
+        cart_y_i = int(cart_y)
+
+        pygame.draw.rect(screen, (0,0,0), (cart_x_px_i - 40, cart_y_i - 20, 80, 40), 2)
+
+        pend_x = cart_x_px + int(l * scale * math.sin(state[2]))
+        pend_y = cart_y - int(l * scale * math.cos(state[2]))
+        pend_x_i = int(pend_x); pend_y_i = int(pend_y)
+
+        pygame.draw.line(screen, (200,0,0), (cart_x_px_i, cart_y_i), (pend_x_i, pend_y_i), 5)
+        pygame.draw.circle(screen, (0,0,200), (pend_x_i, pend_y_i), 10)
+
+        # overlay some values
+        draw_text(screen, f"x={state[0]:.3f} m", (30,160))
+        draw_text(screen, f"theta={math.degrees(state[2]):.2f} deg", (30,180))
+        draw_text(screen, f"F={F:.2f} N", (30,200))
+
+    else:
+        # show initial pendulum not simulating
+        cart_x_px = int(WIDTH//2 + state[0]*scale)
+        cart_y = cart_y_px
+        cart_x_px_i = int(cart_x_px); cart_y_i = int(cart_y)
+        pygame.draw.rect(screen, (0,0,0), (cart_x_px_i - 40, cart_y_i - 20, 80, 40), 2)
+        pend_x = cart_x_px + int(l * scale * math.sin(state[2]))
+        pend_y = cart_y - int(l * scale * math.cos(state[2]))
+        pend_x_i = int(pend_x); pend_y_i = int(pend_y)
+        pygame.draw.line(screen, (200,0,0), (cart_x_px_i, cart_y_i), (pend_x_i, pend_y_i), 5)
+        pygame.draw.circle(screen, (0,0,200), (pend_x_i, pend_y_i), 10)
+        draw_text(screen, "Presiona RUN para iniciar", (30,240), (80,80,80))
 
     pygame.display.flip()
-    clock.tick(50)
+    clock.tick(int(1.0/dt))
 
 pygame.quit()
