@@ -5,7 +5,8 @@ Entregas LAB IA
 
 Este es el repositorio para entrega de laboratorio de IA
 
-Por ahora hay una carpeta que se llama Inteligencia Artificial/ Corte 1.
+Por ahora hay una carpeta que se llama Inteligencia Artificial/ Corte 1. 
+En esta carpeta se encuentra otra carpeta que se llama Pendulo Con Mouse y se encuentran todos los archivos python trabajados en el primer corte. 
 
 En esta se encuentran las entregas del pendulo con Mouse, Pendulo con PID y Pendulo Difuso
 
