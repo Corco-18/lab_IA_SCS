@@ -21,3 +21,5 @@ El archivo "PenduloConMouse.py" es la primera entrega donde se realiza con ayuda
 El archivo "PenduloPID.py" es la segunda entrefa donde se realiza un control PID con retro de estado y cascada para controlar un pendulo invertido, en este también se hace uso de la IA para hacer una app funcional, En el archivo "Pendulo invertido.pdf" se puede ver el desarrollo que se tuvo para sacar el modelado del pendulo invertido. 
 
 El archivo "PenduloDifuso.py" es la ultima entrega donde se busca hacer control del pendulo difuso haciendo uso de la IA y el modelado previamente sacado. Este no funciona correctamente pero se sube para mostrar el intento de realizar la actividad propuesta por el profesor. 
+
+Se sube el archivo "Informe Laboratorio Corte 1" en este se ve un paso a paso resumido de lo que fue la realización de este laboratorio y dando las conclusiones finales respecto al trabajo hecho estos meses. 
